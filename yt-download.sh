@@ -4,14 +4,14 @@
 
 # Default configuration variables
 DEFAULT_DOWNLOAD_DIR="$HOME/Downloads/YouTube"
-OUTPUT_FORMAT="%(title)s.%(ext)s"
+OUTPUT_FORMAT="%(playlist_index|)s%(playlist_index and ' - ' or '')%(title)s.%(ext)s"
 VIDEO_FORMAT="bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
 
 # Function to validate YouTube URL
 is_valid_youtube_url() {
     local url="$1"
     # Basic validation to ensure it looks like a YouTube URL
-    [[ "$url" =~ ^https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[a-zA-Z0-9_-]+$ ]]
+    [[ "$url" =~ ^https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/|youtube\.com/playlist\?list=)[a-zA-Z0-9_-]+(&.*)?$ ]]
 }
 
 # Function to extract YouTube URL from a line
@@ -63,6 +63,12 @@ get_validated_choice() {
     done
 }
 
+# Function to check if URL is a playlist
+is_playlist() {
+    local url="$1"
+    [[ "$url" =~ playlist\?list= ]]
+}
+
 # Function to handle potentially invalid URLs
 handle_url_validation() {
     local url="$1"
@@ -98,7 +104,30 @@ download_video() {
     local download_dir="$2"
     local original_filename=""
     local filename=""
+    local is_playlist_url=$(is_playlist "$url" && echo "true" || echo "false")
 
+    # If it's a playlist, inform the user
+    if [[ "$is_playlist_url" == "true" ]]; then
+        echo "Detected playlist URL. Videos will be downloaded with playlist index prefix."
+        
+        # For playlists, we'll use yt-dlp's playlist handling
+        yt-dlp \
+            --output "$download_dir/$OUTPUT_FORMAT" \
+            --format "$VIDEO_FORMAT" \
+            --merge-output-format mkv \
+            --write-subs \
+            --write-auto-subs \
+            --embed-chapters \
+            --embed-thumbnail \
+            --add-metadata \
+            --sponsorblock-mark all \
+            --recode-video mkv \
+            "$url"
+        
+        return
+    fi
+
+    # For single videos:
     # Dry run to get the filename
     original_filename=$(yt-dlp -o "$OUTPUT_FORMAT" --get-filename "$url")
 
@@ -187,6 +216,9 @@ Enter your choice (D/C/E): " "DCE")
     
     # Read the file line by line
     while IFS= read -r line; do
+        # Skip empty lines or lines starting with # (comments)
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        
         # Extract YouTube URL
         url=$(extract_youtube_url "$line")
         
